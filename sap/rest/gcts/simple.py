@@ -47,6 +47,69 @@ def wait_for_operation(repo, condition_fn, wait_for_ready, http_exc):
     raise SAPCliError(f'Waiting for the operation timed out\n{http_exc}')
 
 
+# --- ASYNC CLONE TASK SUPPORT ---
+def create_clone_task(connection, url, rid, vsid='6IT', start_dir='src/', vcs_token=None, role='SOURCE', typ='GITHUB', no_import=False, opts=None):
+    """Create a clone task for the repository (async clone)"""
+    config = {}
+    if start_dir:
+        config['VCS_TARGET_DIR'] = start_dir
+    if vcs_token:
+        config['CLIENT_VCS_AUTH_TOKEN'] = vcs_token
+    if opts:
+        config.update(opts)
+    if no_import:
+        config['NO_IMPORT'] = 'X'
+
+    # Compose the payload for the clone task
+    payload = {
+        'repository': rid,
+        'url': url,
+        'vsid': vsid,
+        'role': role,
+        'type': typ,
+        'config': config
+    }
+
+    # The endpoint for tasks may differ; adjust as needed for your backend
+    # Here we assume /repository/{rid}/tasks with POST
+    path = f'repository/{rid}/tasks'
+    try:
+        response = connection.post_obj_as_json(path, payload, accept='application/json')
+        return response.json()
+    except Exception as ex:
+        raise SAPCliError(f'Failed to create clone task: {ex}')
+
+
+def get_task_status(connection, rid, task_id):
+    """Get the status of a gCTS task by ID"""
+    path = f'repository/{rid}/tasks/{task_id}'
+    try:
+        response = connection.get_json(path)
+        return response
+    except Exception as ex:
+        raise SAPCliError(f'Failed to get task status: {ex}')
+
+
+def wait_for_task(connection, task_id, rid=None, timeout=600, poll_interval=2.0, backoff=1.5):
+    """Wait for a gCTS task to finish, polling for status"""
+    import time
+    interval = poll_interval
+    start = time.time()
+    while time.time() - start < timeout:
+        if rid is None:
+            # Try to extract rid from task_id if possible, or require it
+            raise SAPCliError('RID (repository id) is required to poll task status')
+        status = get_task_status(connection, rid, task_id)
+        state = status.get('status') or status.get('state')
+        if state and str(state).upper() in ('SUCCESS', 'FINISHED', 'DONE'):
+            return status
+        if state and str(state).upper() in ('FAILED', 'ERROR'):
+            raise SAPCliError(f'Task {task_id} failed: {status}')
+        time.sleep(interval)
+        interval *= backoff
+    raise SAPCliError(f'Timeout waiting for task {task_id}')
+
+
 # pylint: disable=too-many-arguments
 def clone(connection, url, rid, vsid='6IT', start_dir='src/', vcs_token=None, error_exists=True,
           role='SOURCE', typ='GITHUB'):
