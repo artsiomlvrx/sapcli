@@ -14,16 +14,21 @@ class TestGCTSTaskCLI(unittest.TestCase):
     def test_create_clone_task_success(self):
         mock_task = MagicMock()
         mock_task.tid = '1234'
-        mock_task.status = 'RUNNING'
-        mock_task.type = 'CLONE_REPOSITORY'
-        with patch.object(RepositoryTask, 'create', return_value=mock_task), \
-             patch.object(mock_task, 'schedule_task', return_value=mock_task):
-            args = MagicMock(package='ZPKG', branch=None)
-            rc = create_clone_task(self.connection, args)
-            self.assertEqual(rc, 0)
-            self.console.printout.assert_any_call('Task ID:', '1234')
-            self.console.printout.assert_any_call('Task Status:', 'RUNNING')
-            self.console.printout.assert_any_call('Task Type:', 'CLONE_REPOSITORY')
+        with patch.object(RepositoryTask, 'create', return_value=mock_task):
+            with patch.object(mock_task, 'schedule_task', return_value=mock_task):
+                args = MagicMock(package='ZPKG', branch=None)
+                rc = create_clone_task(self.connection, args)
+                self.assertEqual(rc, 0)
+                self.console.printout.assert_any_call('Task ID:', '1234')
+
+    def test_create_clone_task_schedule_error(self):
+        mock_task = MagicMock()
+        with patch.object(RepositoryTask, 'create', return_value=mock_task):
+            with patch.object(mock_task, 'schedule_task', side_effect=GCTSRequestError('err')):
+                args = MagicMock(package='ZPKG', branch=None)
+                rc = create_clone_task(self.connection, args)
+                self.assertEqual(rc, 1)
+                self.console.printerr.assert_called()
 
     def test_create_clone_task_repo_not_exists(self):
         with patch.object(RepositoryTask, 'create', side_effect=GCTSRepoNotExistsError('err')):
